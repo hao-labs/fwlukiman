@@ -7,60 +7,72 @@ namespace Lukiman\tests\Cores;
 use Lukiman\Cores\Env;
 use PHPUnit\Framework\TestCase;
 use Lukiman\Cores\Loader;
+use ReflectionClass;
+use ReflectionMethod;
+use ReflectionProperty;
 
 final class LoaderTest extends TestCase {
+  protected ReflectionClass $loaderReflection;
+  protected ReflectionProperty $loaderEnv;
+  protected ReflectionMethod $resolveEnv;
+
+  protected function setUp(): void {
+    $this->loaderReflection = new ReflectionClass(Loader::class);
+    
+    $this->loaderEnv = $this->loaderReflection->getProperty('env');
+    $this->loaderEnv->setAccessible(true);
+    
+    $this->resolveEnv = $this->loaderReflection->getMethod('resolveEnv');
+    $this->resolveEnv->setAccessible(true);
+  }
+
   public function testResolveConfigFileWithoutEnv(): void {
     $file = 'Cache';
     $expected = 'config/Cache.php';
     $this->assertEquals($expected, Loader::resolveConfigFile($file));
   }
 
-  public function testResolveEnvMethodOutput(): void {
-    $ref = new \ReflectionClass(Loader::class);
-    $method = $ref->getMethod('resolveEnv');
-    $method->setAccessible(true);
-    $result = $method->invoke(null, 'config/Env.php');
+  public function testResolveEnvMethodOutputNull(): void {
+    $result = $this->resolveEnv->invoke(null, 'config/Env.php');
     $this->assertNull($result);
+  }
 
+  /**
+  * Data Provider for testResolveEnvMethodOutput
+  *
+  * @return array
+  * */
+  public static function envResolveDataProvider(): array {
+    return [
+      'staging' => [Env::STAGING, '.staging'],
+      'production' => [Env::PRODUCTION, '.production'],
+      'development' => [Env::DEVELOPMENT, ''],
+    ];
+  }
+
+  /**
+   * @dataProvider envResolveDataProvider
+   */
+  public function testResolveEnvMethodOutput(Env $env, string $expectedPath): void {
     $file = 'DummyConfig';
-    $expected = 'config/' . $file . '.staging.php';
+    $expected = 'config/' . $file . $expectedPath . '.php';
     $envFile = 'config/Env.php';
-    file_put_contents($envFile, '<?php use Lukiman\Cores\Env; return Env::STAGING;');
+    file_put_contents($envFile, '<?php return \Lukiman\Cores\Env::' . $env->name . ';');
     touch($expected);
-    $result = $method->invoke(null, $envFile);
+    $result = $this->resolveEnv->invoke($this->loaderReflection, $envFile);
     $this->assertNotNull($result);
-    $this->assertEquals(Env::STAGING, $result);
-    $this->assertEquals('.staging', $result->getPathname());
-    unlink($expected);
-    unlink($envFile);
-
-    file_put_contents($envFile, '<?php use Lukiman\Cores\Env; return Env::PRODUCTION;');
-    touch($expected);
-    $result = $method->invoke(null, $envFile);
-    $this->assertNotNull($result);
-    $this->assertEquals(Env::PRODUCTION, $result);
-    $this->assertEquals('.production', $result->getPathname());
-    unlink($expected);
-    unlink($envFile);
-
-    file_put_contents($envFile, '<?php use Lukiman\Cores\Env; return Env::DEVELOPMENT;');
-    touch($expected);
-    $result = $method->invoke(null, $envFile);
-    $this->assertNotNull($result);
-    $this->assertEquals(Env::DEVELOPMENT, $result);
-    $this->assertEmpty($result->getPathname());
+    $this->assertEquals($env, $result);
+    $this->assertEquals($expectedPath, $result->getPathname());
     unlink($expected);
     unlink($envFile);
   }
 
   public function testResolveEnvWhenTheEnvFileContentIsEmpty(): void {
-    $ref = new \ReflectionClass(Loader::class);
-    $method = $ref->getMethod('resolveEnv');
-    $method->setAccessible(true);
     $envFile = 'config/Env.php';
     file_put_contents($envFile, '');
-    $result = $method->invoke(null, $envFile);
-    $this->assertIsInt($result);
+    $this->loaderEnv->setValue($this->loaderReflection, null);
+    $result = $this->resolveEnv->invoke(null, $envFile);
+    $this->assertNull($result);
     unlink($envFile);
 
     $file = 'DummyConfig';
